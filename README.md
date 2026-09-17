@@ -329,6 +329,7 @@ node scripts/make-icons.mjs               # 重新生成扩展图标
 | 点了「允许」但工具没执行 | 先看 `/dsh-notifier/config` 的 `lastApproval.outcome`：是 `notified` 就是决定没送达宿主（扩展那一刻正在重连）。通知会**留着**让你再点一次 |
 | 连续几次审批只弹了一条 | 0.2.1 已修（冷却 + 审批互相作废都删掉了）。确认宿主**重启过**（宿主半边是 ESM，不重启跑的还是旧代码） |
 | 自定义端口 | 面板里「手动连接」填 `http://127.0.0.1:<端口>`，会就地申请该来源权限 |
+| `git clone` 报 `schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS` | Windows 版 Git 的 schannel TLS 后端在这台机器上拿不到凭据。让它改用 OpenSSL 后端即可：`git -c http.sslBackend=openssl clone https://github.com/fqsklm/dsh-notifier.git`（想长期生效就 `git config --global http.sslBackend openssl`） |
 
 `/config` 里的 `lastApproval.outcome` 是最有用的排错入口：
 
