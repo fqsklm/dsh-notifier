@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>dsh-notifier 通知示意图</title>
+    <!--
+      这是 README 用的示意图页面，不是产品代码。
+      它按 extension/background.js 里 chrome.notifications.create 的真实字段排版：
+        title          = "dsh · 需要审批" / "dsh · 一轮对话已结束"
+        message        = subtitle + "\n" + body
+        contextMessage = 会话标题 · #短id
+        buttons        = [回到对话, 允许] / [回到对话, 知道了]
+      用无头 Chrome 截图生成 docs/images/*.png。
+    -->
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body {
+        background: #0d3b6e;
+        font: 13px/1.5 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 28px;
+        padding: 18px;
+      }
+      .toast {
+        width: 364px;
+        border-radius: 8px;
+        padding: 12px 14px 10px;
+        background: rgba(32, 32, 32, 0.85);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+        backdrop-filter: blur(30px) saturate(1.2);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+      .icon {
+        width: 20px; height: 20px; flex: none; border-radius: 4px;
+        background: #2f6fd0; position: relative; overflow: hidden;
+      }
+      .icon::before {
+        content: ""; position: absolute; inset: 4px 3px;
+        border-radius: 50%; background: #fff;
+        clip-path: polygon(50% 50%, 100% 4%, 100% 50%);
+      }
+      .icon::after {
+        content: ""; position: absolute; inset: 4px 3px;
+        border-radius: 50%; background: #e8453c;
+        clip-path: polygon(50% 50%, 100% 50%, 50% 100%);
+      }
+      .app { font-size: 12px; color: #cfcfcf; }
+      .title { font-size: 14px; font-weight: 600; margin: 2px 0 4px; }
+      .message { font-size: 14px; color: #f3f3f3; white-space: pre-line; }
+      .context { font-size: 12px; color: #b8b8b8; margin-top: 4px; }
+      .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+      .btn {
+        font-size: 13px; padding: 5px 14px; border-radius: 4px;
+        background: rgba(255, 255, 255, 0.09);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        color: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="toast">
+      <div class="head">
+        <div class="icon"></div>
+        <div class="app">Google Chrome</div>
+      </div>
+      <div class="title">dsh · 需要审批</div>
+      <div class="message">pwsh 申请提权到 danger-full-access
+需要在工作区之外写一个临时配置文件（导出探针日志），确认是否放行。</div>
+      <div class="context">修通知插件 · #a1b2c3d4</div>
+      <div class="buttons">
+        <div class="btn">回到对话</div>
+        <div class="btn">允许</div>
+      </div>
+    </div>
+  </body>
+</html>

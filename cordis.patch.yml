@@ -1,0 +1,15 @@
+# dsh-notifier bundle。安装：在本仓库目录下执行
+#   dsh plugin --profile web add link:$PWD     # PowerShell 里用 link:(Get-Location)
+- insert:
+    - id: dsh-notifier
+      name: dsh-notifier
+      config:
+        # 这里没有冷却 / 间隔项：一句里连续申请两次权限是常态，
+        # 按会话计时会把第二次提醒直接吞掉（见 README「为什么没有冷却」）。
+        enabled: true
+        notifyApproval: true
+        notifyIdle: true
+        notifySubagentIdle: false
+        titlePrefix: dsh
+        showSessionTitle: true
+        showToolName: true

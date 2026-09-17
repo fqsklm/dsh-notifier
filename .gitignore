@@ -1,0 +1,14 @@
+# 测试运行结果（每套测试各写各的）
+test/last-run.txt
+test/last-run-extension.txt
+
+# 测试加载扩展时生成的临时模块（跑完就删，万一中断了也不该提交）
+extension/_under-test.generated.mjs
+
+# docs/shoot.ps1 的产物：配图用还原页重新生成即可，不进仓库
+docs/images/
+docs/_mock/build/
+
+# 临时文件
+*.log
+node_modules/

@@ -1,0 +1,72 @@
+{
+  "name": "dsh-notifier",
+  "version": "0.2.1",
+  "private": true,
+  "description": "DeepSeek Harness 通知器：一轮对话结束或需要审批时，由 Chrome 扩展弹出系统通知并显示 DSH 抛出的申请文字（审批 = 回到对话 / 允许；拒绝走「回到对话」回网页里点），不产生 PowerShell 闪窗",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./client/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "client",
+    "extension",
+    "cordis.patch.yml",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "deepseek",
+    "deepseek-harness",
+    "notifier",
+    "notification",
+    "chrome-extension",
+    "approval",
+    "cordis"
+  ],
+  "homepage": "https://github.com/fqsklm/dsh-notifier#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fqsklm/dsh-notifier.git"
+  },
+  "bugs": {
+    "url": "https://github.com/fqsklm/dsh-notifier/issues"
+  },
+  "license": "MIT",
+  "scripts": {
+    "test": "node test/smoke.mjs && node test/extension.mjs && node test/page-approval.mjs && node test/repro-allow-card.mjs",
+    "test:host": "node test/smoke.mjs",
+    "test:extension": "node test/extension.mjs",
+    "test:page": "node test/page-approval.mjs",
+    "test:card": "node test/repro-allow-card.mjs",
+    "icons": "node scripts/make-icons.mjs",
+    "check": "node --check src/index.js && node --check src/ws.js && node --check src/util.js && node --check client/client.js && node --check extension/background.js && node --check extension/shared.js && node --check extension/content.js && node --check extension/options.js && node --check extension/page-approval.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-api-session-controller"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
