@@ -32,7 +32,7 @@ const NOTIFICATION_ID_PREFIX = 'dsh-notifier-'
  * 这一条就是用来一眼分辨的：/health 的 clientList 里会带上它，
  * 版本对不上就说明扩展没刷新。
  */
-const EXTENSION_BUILD = '4'
+const EXTENSION_BUILD = '5'
 
 /** origin -> { tabs:Set<number>, visible:boolean, focused:boolean } */
 const origins = new Map()
@@ -366,15 +366,39 @@ function reportIsFresh(state) {
   return Boolean(state) && Number.isFinite(state.lastSeen) && Date.now() - state.lastSeen < REPORT_FRESH_MS
 }
 
-/** dsh 页面是不是"当前活动窗口里的活动标签"——现问现答，不受状态缺失影响。 */
+/**
+ * dsh 页面是不是"当前活动窗口里的活动标签"。
+ *
+ * ⚠️ 这里**只查 dsh 标签，不过滤 `active` / `lastFocusedWindow`**，
+ * 判据全部在下面用 JS 自己算。曾经的写法是
+ * `chrome.tabs.query({ url: [origin + '/*'], active: true, lastFocusedWindow: true })`
+ * 然后把"有没有结果"当成"用户正在看这个页面" —— 实测这个判据会**误判成在看**：
+ * 只要浏览器里存在 dsh 标签就命中（用户报的症状："我明明选了在 dsh 页面时不通知，
+ * 但它还是经常弹"）。`tabs.query` 的这两个过滤参数在真实 Chrome 里不可靠，
+ * 而"有没有结果"这种写法一旦过滤失效就退化成"存在即在看"，正好把判决反过来。
+ *
+ * 所以改成：把 dsh 标签全查出来，**自己挑出当前活动的那个**，再问它的窗口有没有焦点。
+ * 这样即使 url 之外的过滤参数被忽略，也不会把"后台窗口里挂着一个 dsh 标签"当成"在看"。
+ */
 async function pageIsActiveTab(origin) {
   if (!origin) return false
   try {
-    const tabs = await chrome.tabs.query({ url: [`${origin}/*`], active: true, lastFocusedWindow: true })
-    if (!tabs.some((tab) => typeof tab.id === 'number')) return false
-    // 窗口本身没焦点（用户在别的应用里）时不算"在看"：这正是要弹通知的场景。
+    const tabs = await chrome.tabs.query({ url: [`${origin}/*`] })
+    const active = tabs.filter((tab) => tab?.active === true)
+    if (active.length === 0) return false
+    // 活动的那个标签在哪个窗口里，就问哪个窗口有没有焦点；
+    // 万一 API 没给 active（或没给 id），退回问"最后聚焦的窗口"。
+    const windowIds = [...new Set(active.map((tab) => tab.windowId).filter((id) => typeof id === 'number'))]
+    if (windowIds.length === 0) {
+      try {
+        const window = await chrome.windows.getLastFocused()
+        return Boolean(window) && window.focused !== false
+      } catch {
+        return false
+      }
+    }
     try {
-      const window = await chrome.windows.getLastFocused()
+      const window = await chrome.windows.get(windowIds[0])
       if (window && window.focused === false) return false
     } catch {
       /* 取不到窗口就不作为否决理由 */
@@ -392,9 +416,11 @@ async function pageIsWatching(origin) {
   // 是唯一能分辨"窗口有焦点但用户在别的应用里"的信号。
   // （onDisconnect 不再把 focused 抹成 false，所以断开后这里读到的仍是"断开前"的
   //   判断；它不新鲜之后才落到下面那个现问现答的判据。）
-  if (reportIsFresh(state)) return state.visible === true && state.focused === true
+  if (reportIsFresh(state)) {
+    return state.visible === true && state.focused === true
+  }
   // 报告缺失或已经不新鲜：问一次"这个页面是不是活动标签"。
-  return pageIsActiveTab(origin)
+  return await pageIsActiveTab(origin)
 }
 
 /**
@@ -486,16 +512,24 @@ async function notificationTimeoutSec() {
 }
 
 /**
- * 通知只有一种显示方式，理由：
+ * 通知的显示方式。
  *
- * `requireInteraction: true` 在 Windows 上的表现是**只进通知中心、不弹横幅**
- * —— 和它的名字（"需要处理"）给人的预期正好相反，实测就是这样，用户看到的是
- * "明明选了需要处理，反而没有横幅"。所以这个开关已经删掉，固定用 false：
- * 横幅一定会出现。
+ * **时长决定 `requireInteraction`**（这是"选了永久却过一会儿自己消失"的根因）：
  *
- * `priority: 2`（高优先级）保持不变，配合 requireInteraction: false，
- * 横幅会一直留在屏幕上，直到你点它或划掉它 —— 这正是想要的"永久横幅"。
- * 系统那边的"通知显示时长"只影响其他应用的普通通知。
+ * - 用户在面板里选「永久」（`timeoutSec === 0`）→ `requireInteraction: true`。
+ *   只有这个标志才是**告诉 Windows"这条别按系统时长收走"**的唯一手段；
+ *   一直写死 `false` 等于明说"不用一直留着"，于是系统（设置里的"通知显示时长"，
+ *   默认几秒）到点就把横幅收走 —— 用户看到的就是"我选了永久，它还是自己消失"。
+ * - 选了具体时长（15 秒 / 1 分钟 …）→ `requireInteraction: false`，
+ *   由扩展自己定时收掉，系统那边不必替我们保留。
+ *
+ * `priority: 2`（高优先级）保持不变。
+ *
+ * ⚠️ 关于 `requireInteraction: true` 会不会"只进通知中心、不弹横幅"：早期在
+ * Windows 10 上确实观察到过这种表现，当时因此把它写死成 false。但那样换来的是
+ * "永久也留不住"，两个毛病同时存在。现在按用户的显式选择走，并且在扩展面板里
+ * 写清楚：如果横幅还是不出现，去查 **系统 → 通知 → Google Chrome** 是否被静音，
+ * 以及"通知显示时长"和「请勿打扰」。
  */
 async function showNotification(origin, item) {
   await loadStore()
@@ -512,6 +546,7 @@ async function showNotification(origin, item) {
   const buttons = (item.actions ?? ['open']).map((action) => ({ title: buttonTitle(action) }))
   const message = [item.subtitle, item.body].filter((part) => part && String(part).trim()).join('\n')
   const timeoutSec = await notificationTimeoutSec()
+  const permanent = timeoutSec <= 0
   try {
     await chrome.notifications.create(id, {
       type: 'basic',
@@ -521,7 +556,7 @@ async function showNotification(origin, item) {
       contextMessage: String(item.session ?? '').slice(0, 80),
       buttons,
       priority: 2,
-      requireInteraction: false,
+      requireInteraction: permanent,
       silent: false,
     })
   } catch (error) {
@@ -547,8 +582,9 @@ async function showNotification(origin, item) {
   // 记下"这条已经弹过"：宿主重连时重发同一 token 也不会再弹。
   delivered.add(id)
   void persistStore()
-  // 停留时长：0 = 一直留着（等用户划掉/点掉），正数 = 到点自动撤下。
-  if (timeoutSec > 0) {
+  // 停留时长：0 = 永久（不设定时器，靠 requireInteraction 让系统也别收），
+  // 正数 = 到点由扩展自己撤下。
+  if (!permanent) {
     const timer = setTimeout(() => void clearNotification(id), timeoutSec * 1000)
     timers.set(id, timer)
   }

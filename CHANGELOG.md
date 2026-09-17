@@ -1,5 +1,42 @@
 # 变更记录
 
+## 0.2.2
+
+### 修复
+
+- **选了「在 dsh 页面时不通知」，还是经常弹**（用户报）。
+  根因：`pageIsActiveTab` 用
+  `chrome.tabs.query({ url, active: true, lastFocusedWindow: true })` 的**"有没有结果"**
+  当"用户正在看这个页面"。真实 Chrome 里 `tabs.query` 的 `active` / `lastFocusedWindow`
+  这两个过滤参数并不可靠 —— 一旦过滤失效，这个判据就退化成"浏览器里存在 dsh 标签即算在看"，
+  于是人在别的窗口里也被判成 `page-focused`。
+  修法：**只按 url 查 dsh 标签，活动性由标签自己的 `active` / `windowId` 字段用 JS 判断**，
+  再问那个窗口有没有焦点（`chrome.windows.get`）；拿不到 windowId 时才退回
+  `getLastFocused()`。这样"存在标签"和"人在看"再也不会混为一谈。
+  回归测试：`test/extension.mjs` 的「dsh 标签在**别的窗口**里挂着 → 照常弹」、
+  「内容脚本的报告过期后，改用"活动标签"兜底判据」；
+  测试里的假 `chrome.tabs.query` 也改成**照真实行为只按 url 过滤** ——
+  早先它按 `query.active` 过滤，正好把这个 bug 盖住了。
+- **选了「永久」停留，横幅过一会儿还是自己消失**（用户报）。
+  根因：`chrome.notifications.create` 一直写死 `requireInteraction: false`，
+  等于告诉 Windows"这条不用一直留着"，于是系统按自己的"通知显示时长"（默认几秒）
+  把横幅收走 —— 面板里选的"永久"只管了扩展这边的定时器，管不到系统。
+  修法：**时长决定 `requireInteraction`** —— 选「永久」（`timeoutSec === 0`）时传 `true`，
+  选具体秒数时传 `false`（由扩展自己定时撤下）。
+  早期"`requireInteraction: true` 在 Windows 上只进通知中心、不弹横幅"的观察因此被推翻：
+  现在按用户的显式选择走，并在扩展面板里写清楚横幅不出现时该查哪里
+  （系统 → 通知 → Google Chrome 是否静音 / 通知显示时长 / 勿扰）。
+  回归测试：`test/extension.mjs` 的「停留时长「永久」…」「停留时长选了 15 秒…」
+  「永久保留时不会被任何定时器收走」。
+
+### 变更
+
+- 扩展构建代号 `EXTENSION_BUILD`：`4` → `5`（宿主 `/config` 的 `clientList[].build` 能看到）。
+  这次改了扩展代码，**装过旧版的要在 `chrome://extensions` 里点一次刷新**。
+- 扩展面板「通知停留时长」的说明改写：写清「永久」是怎么生效的，以及横幅仍不出现时该查什么。
+- `test/extension.mjs` 的假 `chrome.windows` 改成按窗口 id 判焦点（`get(windowId)`），
+  这样"dsh 标签挂在后台窗口里"这种多窗口场景才测得出。
+
 ## 0.2.1
 
 ### 修复

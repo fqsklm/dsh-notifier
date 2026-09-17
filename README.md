@@ -12,7 +12,7 @@
 [![DSH](https://img.shields.io/badge/DSH-plugin-4d6bfe.svg)](https://www.npmjs.com/package/@deepseek-ai/dsh)
 [![Node](https://img.shields.io/badge/Node-%E2%89%A518-3c873a.svg)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-0-ff7a2a.svg)](#技术实现)
-[![Tests](https://img.shields.io/badge/checks-117%20passed-2ea44f.svg)](#测试)
+[![Tests](https://img.shields.io/badge/checks-123%20passed-2ea44f.svg)](#测试)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Chrome%20%2F%20Edge-lightgrey.svg)](#设计边界)
 
 [效果](#效果) · [快速开始](#快速开始) · [配置](#配置) · [为什么没有冷却](#为什么没有冷却) · [常见问题](#常见问题) · [协议](#协议想自己写客户端时看这里)
@@ -224,18 +224,23 @@ dsh-notifier/
   刷新扩展会清空 `storage.session`，所以启动时会把通知中心里还留着的
   `dsh-notifier-<token>` 重新认成"已弹过"；正在处理中的 token 还有一道同步闸门，
   快照和 pending 两帧交错时也只会弹一条。
-- **页面就在眼前时不打扰。** 内容脚本持续汇报页面的可见性与焦点，扩展只在
-  「dsh 页面不可见」或「窗口没焦点」时才弹。想知道上一条为什么没弹，打开面板看「最近一条」那行。
+- **页面就在眼前时不打扰。** 判据是「dsh 页面可见 **且** 窗口有焦点」：内容脚本持续汇报
+  页面的可见性与焦点（用的是 `document.hasFocus()`）；这份报告超过 30 秒没更新（Service Worker
+  被回收、页面刚 reload）时，退回问一次"**dsh 标签是不是当前活动窗口里的活动标签**" ——
+  注意这一问只看标签自己的 `active` / `windowId` 字段，**不依赖 `tabs.query` 的过滤参数**
+  （那两个参数不可靠：过滤一旦失效，"浏览器里存在 dsh 标签"就会被当成"人在看"，
+  于是该弹的时候反而不弹）。想知道上一条为什么没弹，打开面板看「最近一条」那行。
 - **点「回到对话」会把那条通知撤下**，但审批本身仍然悬着：网页里的卡片还在，
   你回去看完可以接着拒绝。点「知道了」（一轮结束）则连待办一起收掉。
 - **划掉通知会告诉宿主。** 你把审批横幅划掉、或通知到点自动收掉时，扩展会发一条 `dismiss`
   让宿主清掉那条待办（通道没连上就先排队，连上后补发）；否则那条待办会永远留在队列里、
   而且再也弹不出通知（僵尸待办）。注意 `dismiss` **不等于拒绝**：审批交回网页卡片。
 - **通知停留时长**在面板里选：**永久（默认，直到你划掉）** / 15 秒 / 1 分钟 / 5 分钟 / 1 小时。
-  它控制的是**通知中心**里的保留时间。屏幕右下角的**横幅**一定会弹出并一直挂着，
-  直到你点它或划掉它 —— 这是固定的，面板里没有开关。
-  （`requireInteraction: true` 在 Windows 上的实际表现是"只进通知中心、不弹横幅"，
-  和它的名字给人的预期正好相反，所以固定用 `priority: 2` + `requireInteraction: false`。）
+  这个选择**真的会传导到系统**：选「永久」时扩展给通知打上 `requireInteraction: true`，
+  这才是"告诉 Windows 别按系统时长自动收走"的唯一手段；选了具体秒数则由扩展自己定时撤下。
+  > 选了「永久」横幅还是自己消失？那就不在插件这边了：查 **系统 → 通知 → Google Chrome**
+  > 是否被静音、**通知显示时长**、以及**请勿打扰**是否打开。另外 Windows 的通知中心
+  > 只保留有限条数，堆满之后旧的那条会被挤出去（已经答过的审批通知被挤掉不影响任何事）。
 - **通道断了也不僵住。** 点「允许」/「知道了」时，扩展会等宿主的 **ack 回执**才算送达；
   WebSocket 送不到（通道已死、或宿主回 `expired`）、或 3 秒内没有回执，就自动改用
   `POST /dsh-notifier/action` 重投一次。
@@ -277,12 +282,12 @@ api-remotes 只在"收到客户端答复"时才向浏览器回 cancel 帧，
 
 ## 测试
 
-不需要任何测试框架，四套都是 `node` 直接跑的脚本，**当前 117 项全绿**：
+不需要任何测试框架，四套都是 `node` 直接跑的脚本，**当前 123 项全绿**：
 
 ```powershell
 npm test                        # 四套一起跑
 node test/smoke.mjs             # 宿主半边：真 HTTP + 真 WebSocket 端到端（55 项）
-node test/extension.mjs         # 扩展 Service Worker：假 chrome.* 跑真代码（26 项）
+node test/extension.mjs         # 扩展 Service Worker：假 chrome.* 跑真代码（32 项）
 node test/page-approval.mjs     # "页内按一次允许"：假 DOM（23 项）
 node test/repro-allow-card.mjs  # 卡片回归：真实 cordis + 真实 api-remotes（13 项）
 npm run check                   # 九个文件逐个语法检查
@@ -291,7 +296,7 @@ npm run check                   # 九个文件逐个语法检查
 | 测试 | 盯住什么 |
 |---|---|
 | `test/smoke.mjs` | 宿主端到端。其中「连续两次审批各自弹一条通知，且各自都能作答」是 0.2.1 的回归：一条消息里连续申请两次权限时，两条都要弹、都要点得动 |
-| `test/extension.mjs` | 扩展 SW 的全部行为：判重、身份上报、决定送达、页内点击、**该不弹就别弹**（活动标签 / 断线窗口 / 后台标签 / 别的应用 / 标签关掉），以及"扩展刚刷新过（session 存储被清空、通知中心里那几条还在）"这类会重复弹通知的路径 |
+| `test/extension.mjs` | 扩展 SW 的全部行为：判重、身份上报、决定送达、页内点击、**该不弹就别弹**（活动标签 / 断线窗口 / 后台标签 / 别的应用 / 标签关掉 / **标签挂在别的窗口里**）、**该留住就留住**（永久横幅的 `requireInteraction`），以及"扩展刚刷新过（session 存储被清空、通知中心里那几条还在）"这类会重复弹通知的路径 |
 | `test/page-approval.mjs` | 页内找卡片、按按钮的规则（精确文案 / 结构兜底 / 认不准就不动手） |
 | `test/repro-allow-card.mjs` | 「通知里点允许 → 网页卡片会不会消失」：真实 cordis + 真实 api-remotes + 假网页 |
 
@@ -328,6 +333,8 @@ node scripts/make-icons.mjs               # 重新生成扩展图标
 | 点了「允许」工具跑了，网页卡片却还停在「等待审批」 | 扩展没能去页内按按钮。看扩展日志里 `没能在网页里按下「允许」` 那行的 reason：`no-card` / `ambiguous` / `inject-failed`；同时确认扩展刷新过、`scripting` 权限已同意 |
 | 点了「允许」但工具没执行 | 先看 `/dsh-notifier/config` 的 `lastApproval.outcome`：是 `notified` 就是决定没送达宿主（扩展那一刻正在重连）。通知会**留着**让你再点一次 |
 | 连续几次审批只弹了一条 | 0.2.1 已修（冷却 + 审批互相作废都删掉了）。确认宿主**重启过**（宿主半边是 ESM，不重启跑的还是旧代码） |
+| 人就在 dsh 页面前，通知还是弹 | 0.2.2 已修（这个判据不再依赖 `tabs.query` 的 `active` / `lastFocusedWindow` 过滤参数）。确认扩展**刷新过**：面板里没有「最近一条」那行就是旧代码 |
+| 选了「永久」，横幅过一会儿自己没了 | 0.2.2 起「永久」会给通知打 `requireInteraction: true`，别再让它被系统按"通知显示时长"收走。还是不行就查 **系统 → 通知 → Google Chrome** 是否被静音 / 通知显示时长 / 勿扰 |
 | 自定义端口 | 面板里「手动连接」填 `http://127.0.0.1:<端口>`，会就地申请该来源权限 |
 | `git clone` 报 `schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS` | Windows 版 Git 的 schannel TLS 后端在这台机器上拿不到凭据。让它改用 OpenSSL 后端即可：`git -c http.sslBackend=openssl clone https://github.com/fqsklm/dsh-notifier.git`（想长期生效就 `git config --global http.sslBackend openssl`） |
 
@@ -358,6 +365,11 @@ node scripts/make-icons.mjs               # 重新生成扩展图标
 | `src/**`（宿主） | **重启 `dsh web`** | 同上（ESM 模块缓存按 specifier 命中） |
 | `client/**`（浏览器半边） | 刷新 dsh 页面 | 同上 |
 | `cordis.patch.yml` 里的配置 | `patchReload: live` 会热加载 | 一般不需要重启 |
+
+> **0.2.2 同时改了宿主和扩展**：`extension/background.js` 是扩展侧的修复（抑制判据、
+> 永久横幅），`src/**` 是宿主侧的修复。所以升级到 0.2.2 要**两件都做**：
+> 在 `chrome://extensions` 里刷新扩展，并重启 `dsh web`。
+> 只做一半的症状是"两个毛病都还在"。
 
 ### 发布前检查清单
 

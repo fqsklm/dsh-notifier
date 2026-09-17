@@ -121,8 +121,9 @@
     <div class="card">
       <div class="name">通知停留时长</div>
       <div class="dim">
-        「永久」= 一直留在通知中心，直到你划掉或点掉（推荐）。<br />
-        屏幕右下角的<b>横幅</b>会一直挂在屏幕上，直到你点它或划掉它 —— 不需要另外设置。
+        「永久」= 一直留着，直到你点它或划掉它（推荐）。<br />
+        选「永久」时扩展会告诉 Windows「这条别自动收」，屏幕右下角的<b>横幅</b>就会一直挂着；
+        选了具体秒数则由扩展自己到点撤下。
       </div>
       <div class="row" style="margin-top: 8px">
         <select id="duration">
@@ -132,6 +133,12 @@
           <option value="300">5 分钟</option>
           <option value="3600">1 小时</option>
         </select>
+      </div>
+      <div class="dim" style="margin-top: 8px">
+        选了「永久」横幅还是自己消失？那就不是插件这边了：查
+        <b>设置 → 系统 → 通知 → Google Chrome</b> 是否被静音、以及「通知显示时长」和「请勿打扰」。
+        另外，Windows 只让通知中心保留有限条数，堆满之后旧的那条会从<b>通知中心</b>里被挤掉
+        （已经答过的审批通知被挤掉不影响任何事）。
       </div>
     </div>
 

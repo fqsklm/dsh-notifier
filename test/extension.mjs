@@ -55,18 +55,36 @@ const fake = {
   slowConfig: true,
   /** 是否已授权来源（决定 ensureConnection 会不会真的建通道） */
   grantPermission: false,
-  /** tabs.query 返回的标签页（注入页内点击时要用） */
-  tabs: [],
   /** 记录注入页面的那次调用 */
   injections: [],
   /** 页面里有没有审批卡（false = 模拟"卡片还没渲染出来 / 页面没这张卡"） */
   pageCardReady: true,
   /** 注入是否直接抛错（模拟没有注入权限 / 标签已关） */
   injectionFails: false,
-  /** tabs.query({active:true}) 会回哪一个标签（null = 没有活动标签） */
+  /** tabs.query 返回的标签页（每个标签自带 active / windowId，后台自己算"谁在看"） */
+  tabs: [],
+  /** 活动标签所在的窗口 id（pageIsActiveTab 会去问这个窗口有没有焦点） */
   activeTabId: null,
+  /** 最后聚焦的窗口 id（标签没带 windowId 时的退路） */
+  focusedWindowId: 1,
   /** 最近聚焦窗口是否有焦点（判断"页面在眼前"用） */
   windowFocused: true,
+  /** 面板里选的"通知停留时长"（秒）。undefined = 没存过，用默认的"永久" */
+  notificationTimeoutSec: undefined,
+  /** 面板里的"强制弹通知"开关 */
+  forceShow: false,
+}
+
+/** chrome.tabs.query 的 url 模式匹配：够用来区分 `http://127.0.0.1:3080/*` 这类模式。 */
+function matchesUrl(url, pattern) {
+  if (pattern === '<all_urls>') return true
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')
+  return new RegExp(`^${escaped}$`).test(url)
+}
+
+/** 造一个标签，顺手把 active / windowId 补上，省得每个用例都写全。 */
+function tab(id, url, { active = false, windowId = 1 } = {}) {
+  return { id, url, active, windowId }
 }
 
 const event = () => ({ addListener() {}, removeListener() {} })
@@ -106,7 +124,11 @@ globalThis.chrome = {
         // `chrome.storage.local.get` 是跨进程往返，正是这个 await 窗口
         // 让"两帧交错"变成可以复现的竞态。
         if (fake.slowConfig) await new Promise((resolve) => setTimeout(resolve, 15))
-        return key === 'forceShow' ? { forceShow: false } : {}
+        if (key === 'forceShow') return { forceShow: fake.forceShow === true }
+        if (key === 'notificationTimeoutSec' && Number.isFinite(fake.notificationTimeoutSec)) {
+          return { notificationTimeoutSec: fake.notificationTimeoutSec }
+        }
+        return {}
       },
       async set() {},
     },
@@ -134,11 +156,13 @@ globalThis.chrome = {
   },
   tabs: {
     async query(query) {
-      // 扩展问"哪个标签是活动标签"时只回活动那个（假 DOM 里只有 id 对得上才算）。
-      if (query?.active === true) {
-        return fake.tabs.filter((tab) => tab.id === fake.activeTabId)
-      }
-      return fake.tabs
+      // 真实调用只按 url 模式过滤，**不**按 active / lastFocusedWindow 过滤：
+      // 后台就是靠每个标签自己的 active/windowId 字段自己算的（见 pageIsActiveTab）。
+      // 这里刻意照真实行为模拟 —— 早先的假实现会按 query.active 过滤，
+      // 于是掩盖了"只要浏览器里有 dsh 标签就算人正在看"这个真 bug。
+      const patterns = query?.url ?? []
+      if (patterns.length === 0) return fake.tabs
+      return fake.tabs.filter((tab) => patterns.some((pattern) => matchesUrl(tab.url ?? '', pattern)))
     },
     async update() {},
     async create() {},
@@ -147,11 +171,15 @@ globalThis.chrome = {
   },
   windows: {
     async update() {},
-    async getLastFocused() {
-      return { id: 1, focused: fake.windowFocused }
+    async get(windowId) {
+      // 只有"当前有焦点的那个窗口"才 report focused: true —— 多窗口误判那条回归
+      // （dsh 标签挂在后台窗口里）正是靠这里区分开的。
+      return { id: windowId, focused: windowId === fake.focusedWindowId }
     },
-  },
-  /**
+    async getLastFocused() {
+      return { id: fake.focusedWindowId, focused: true }
+    },
+  },  /**
    * 注入页内点击用的假实现。真实调用是
    * `chrome.scripting.executeScript({ target: {tabId}, func, args: [reason] })`。
    */
@@ -741,12 +769,21 @@ describe('扩展：人就在网页前面时不该打扰（"有时候我在网页
     // 前面的用例往 origins 里塞过状态；这里真的清空，才叫"什么都没报过"。
     for (const [, state] of internals.origins) if (state.reconnectTimer) clearTimeout(state.reconnectTimer)
     internals.origins.clear()
+    // 去重窗口（claims）也是内存态：真实情况里扩展重启就没了。
+    // 不清它的话，同一会话的第二条用例会被上一条的 claim 挡成 duplicate。
+    internals.claims.clear()
     fake.center.clear()
     fake.created.length = 0
     fake.store = {}
-    fake.tabs = options.tabs ?? [{ id: 1, url: `${ORIGIN}/#/` }]
-    fake.activeTabId = options.activeTabId ?? 1
+    fake.notificationTimeoutSec = undefined
+    fake.forceShow = false
+    const defaults = [tab(1, `${ORIGIN}/#/`, { active: true })]
+    fake.tabs = options.tabs ?? defaults
+    // 活动标签由标签自己声明（active: true）；用例也可以只给 id 显式指定。
+    const declared = fake.tabs.find((entry) => entry.active === true)?.id ?? null
+    fake.activeTabId = options.activeTabId ?? declared
     fake.windowFocused = options.windowFocused ?? true
+    fake.focusedWindowId = options.focusedWindowId ?? 1
   }
 
   it('内容脚本还没报告过状态，但 dsh 就是当前活动标签 → 不弹', async () => {
@@ -766,22 +803,151 @@ describe('扩展：人就在网页前面时不该打扰（"有时候我在网页
   })
 
   it('页面在后台标签里、窗口还有焦点 → 照常弹', async () => {
-    freshStart({ tabs: [{ id: 1, url: `${ORIGIN}/#/` }], activeTabId: 99 })
+    freshStart({ tabs: [tab(1, `${ORIGIN}/#/`, { active: false })], activeTabId: 99 })
     internals.origins.set(ORIGIN, { tabs: new Set([1]), visible: false, focused: false, lastSeen: Date.now(), since: Date.now() })
     const decision = await internals.shouldShow({ ...idle('tokVisC'), origin: ORIGIN })
     assert.equal(decision.show, true, '用户在看别的页面，应当提醒')
   })
 
-  it('用户在别的应用里（窗口没焦点）→ 照常弹', async () => {
-    freshStart({ windowFocused: false })
+  it('用户在别的应用里（没有浏览器窗口有焦点）→ 照常弹', async () => {
+    // 窗口 1 里的 dsh 标签是活动标签，但整个浏览器都没焦点（用户在别的应用里）。
+    freshStart({ focusedWindowId: 2 })
     const decision = await internals.shouldShow({ ...idle('tokVisD'), origin: ORIGIN })
-    assert.equal(decision.show, true, '窗口都没焦点，应当提醒')
+    assert.equal(decision.show, true, '窗口没焦点，应当提醒')
   })
 
   it('dsh 标签关掉了 → 照常弹', async () => {
     freshStart({ tabs: [], activeTabId: null })
     const decision = await internals.shouldShow({ ...idle('tokVisE'), origin: ORIGIN })
     assert.equal(decision.show, true, '页面都没开，应当提醒')
+  })
+
+  it('回归：dsh 标签在**别的窗口**里挂着 → 照常弹（老判据会误判成"人在看"）', async () => {
+    // 用户报："我明明选了在 dsh 页面时不给我通知，但它还是经常弹。"
+    // 根因：老判据用 `tabs.query({url, active:true, lastFocusedWindow:true})` 的
+    // "有没有结果"当"用户正在看"，而真实 Chrome 里这两个过滤参数不可靠 ——
+    // 只要浏览器里存在 dsh 标签就命中，于是判决直接是 page-focused。
+    // 这个用例里 dsh 标签在窗口 1（后台），焦点在窗口 2 的别的页面上。
+    freshStart({
+      tabs: [
+        tab(1, `${ORIGIN}/#/`, { active: true, windowId: 1 }),
+        tab(2, 'https://example.com/', { active: true, windowId: 2 }),
+      ],
+      activeTabId: null, // 让判据只能靠标签自己的 active/windowId
+      focusedWindowId: 2,
+    })
+    const decision = await internals.shouldShow({ ...idle('tokVisF'), origin: ORIGIN })
+    assert.equal(decision.show, true, `焦点在别的窗口，应当提醒：${JSON.stringify(decision)}`)
+  })
+
+  it('回归：活动标签是 dsh 时 → 不弹（判据是"标签自己声明 active"，不靠 tabs.query 的过滤参数）', async () => {
+    freshStart({
+      tabs: [
+        tab(1, `${ORIGIN}/#/a`, { active: false, windowId: 1 }),
+        tab(2, `${ORIGIN}/#/b`, { active: true, windowId: 1 }),
+      ],
+      activeTabId: null,
+    })
+    // 内容脚本报的是"可见 + 有焦点"（人在这个页面上）。
+    // 这里刻意把 activeTabId 设成 null：老判据靠 tabs.query 的 active 过滤，
+    // 过滤一旦失效就会误判成"没人在看"→ 弹通知；新判据只看标签自己的 active 字段。
+    internals.origins.set(ORIGIN, { tabs: new Set([1]), visible: true, focused: true, lastSeen: Date.now(), since: Date.now() })
+    const decision = await internals.shouldShow({ ...idle('tokVisG'), origin: ORIGIN })
+    assert.equal(decision.show, false, `人在 dsh 页面上，不该弹：${JSON.stringify(decision)}`)
+    assert.equal(decision.reason, 'page-focused')
+  })
+
+  it('内容脚本的报告过期后，改用"活动标签"兜底判据（人还在页面上 → 不弹）', async () => {
+    freshStart({
+      tabs: [tab(1, `${ORIGIN}/#/`, { active: true, windowId: 1 })],
+      activeTabId: null,
+    })
+    // 报告过期（>30 秒没更新，比如 SW 被回收那段时间）：内容脚本那份不可信，
+    // 这时要看"dsh 标签是不是活动标签"——是，就不打扰。
+    internals.origins.set(ORIGIN, { tabs: new Set([1]), visible: false, focused: false, lastSeen: Date.now() - 60000, since: Date.now() - 60000 })
+    const decision = await internals.shouldShow({ ...idle('tokVisH'), origin: ORIGIN })
+    assert.equal(decision.show, false, `报告过期但 dsh 就是活动标签，不该弹：${JSON.stringify(decision)}`)
+  })
+})
+
+describe('扩展：选了「永久」横幅就不该自己消失', () => {
+  const approval = (token) => ({
+    token,
+    kind: 'approval',
+    sessionId: 'session-lifetime1',
+    session: '会话 · #lifetime1',
+    title: 'dsh · 需要审批',
+    subtitle: 'pwsh 申请提权到 workspace-write',
+    body: '要写工作区外的文件',
+    actions: ['open', 'allow'],
+    createdAt: Date.now(),
+  })
+
+  /** 让"人不在看页面"，这样通知一定会真的弹出来。 */
+  const awayFromPage = () => {
+    internals.origins.set(ORIGIN, {
+      tabs: new Set([1]),
+      visible: false,
+      focused: false,
+      lastSeen: Date.now(),
+      since: Date.now(),
+    })
+  }
+
+  const freshStart = (options = {}) => {
+    internals.reset()
+    internals.setStoreLoaded(false)
+    for (const [, state] of internals.origins) if (state.reconnectTimer) clearTimeout(state.reconnectTimer)
+    internals.origins.clear()
+    fake.center.clear()
+    fake.created.length = 0
+    fake.store = {}
+    fake.forceShow = false
+    fake.notificationTimeoutSec = options.notificationTimeoutSec
+    fake.tabs = [tab(1, `${ORIGIN}/#/`, { active: false })]
+    fake.activeTabId = options.activeTabId ?? 99
+    fake.windowFocused = true
+    // 这个 describe 不关心"谁在看"，固定成"窗口有焦点但活动标签不是 dsh"。
+    fake.focusedWindowId = options.focusedWindowId ?? 1
+  }
+
+  it('停留时长「永久」（默认）：create 时不带 requireInteraction=false —— 否则 Windows 按系统时长自动收掉', async () => {
+    // 用户报："我选择让通知横幅永久显示，但它过了一会会自己消失。"
+    // 根因：一直写死 requireInteraction: false，等于告诉系统"这条不用一直留着"，
+    // 于是 Windows 的"通知显示时长"（默认几秒）到了就把横幅收走。
+    freshStart()
+    awayFromPage()
+    await internals.onHostMessage(ORIGIN, { type: 'pending', item: approval('tokForever') })
+    await sleep(60)
+    const created = fake.created.find((entry) => entry.id === `${ID_PREFIX}tokForever`)
+    assert.ok(created, '应当弹出来了')
+    const options = fake.center.get(`${ID_PREFIX}tokForever`)
+    assert.equal(options.requireInteraction, true, `「永久」必须让系统别自动收：${JSON.stringify(options)}`)
+    assert.equal(fake.center.has(`${ID_PREFIX}tokForever`), true)
+  })
+
+  it('停留时长选了 15 秒：到点由扩展自己收掉，而且此时不要求系统保留', async () => {
+    freshStart({ notificationTimeoutSec: 15 })
+    awayFromPage()
+    await internals.onHostMessage(ORIGIN, { type: 'pending', item: approval('tokTimed') })
+    await sleep(60)
+    const options = fake.center.get(`${ID_PREFIX}tokTimed`)
+    assert.ok(options, '应当弹出来了')
+    assert.equal(options.requireInteraction, false, '有明确时长时不需要系统保留')
+    assert.equal(fake.center.has(`${ID_PREFIX}tokTimed`), true, '15 秒还没到，不该提前收')
+  })
+
+  it('回归：永久保留时不会被任何定时器收走（等过 CLAIM_TTL 也不动它）', async () => {
+    freshStart()
+    awayFromPage()
+    await internals.onHostMessage(ORIGIN, { type: 'pending', item: approval('tokSticky') })
+    await sleep(60)
+    assert.equal(fake.center.has(`${ID_PREFIX}tokSticky`), true)
+    // 宿主重连补发快照：不能把已经弹过的那条重复弹、更不能撤掉它
+    await internals.onHostMessage(ORIGIN, { type: 'snapshot', items: [approval('tokSticky')] })
+    await sleep(60)
+    assert.equal(fake.center.has(`${ID_PREFIX}tokSticky`), true, '快照补发不该动它')
+    assert.equal(fake.center.size, 1, '也不该多出一条')
   })
 })
 

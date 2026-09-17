@@ -1,6 +1,6 @@
 {
   "name": "dsh-notifier",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "DeepSeek Harness 通知器：一轮对话结束或需要审批时，由 Chrome 扩展弹出系统通知并显示 DSH 抛出的申请文字（审批 = 回到对话 / 允许；拒绝走「回到对话」回网页里点），不产生 PowerShell 闪窗",
   "type": "module",

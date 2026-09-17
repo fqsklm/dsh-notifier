@@ -1,4 +1,4 @@
-﻿# 生成 README 用的配图（只在本机跑，产物进 docs/images/，那个目录已 gitignore）
+# 生成 README 用的配图（只在本机跑，产物进 docs/images/，那个目录已 gitignore）
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File docs\shoot.ps1
 #
@@ -64,6 +64,6 @@ function Shoot([string]$page, [string]$target, [int]$width, [int]$height, [strin
   Write-Host "ok  $target  $size  $((Get-Item $target).Length) bytes"
 }
 
-Shoot (Join-Path $PSScriptRoot '_mock\panel.html') (Join-Path $out 'panel.png') 380 486 '2'
+Shoot (Join-Path $PSScriptRoot '_mock\panel.html') (Join-Path $out 'panel.png') 380 578 '2'
 Shoot (Join-Path $PSScriptRoot '_mock\notification-approval.html') (Join-Path $out 'notification-approval.png') 420 190 '2'
 Shoot (Join-Path $PSScriptRoot '_mock\notification-idle.html') (Join-Path $out 'notification-idle.png') 420 168 '2'
