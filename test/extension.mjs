@@ -177,7 +177,9 @@ globalThis.chrome = {
       return { id: windowId, focused: windowId === fake.focusedWindowId }
     },
     async getLastFocused() {
-      return { id: fake.focusedWindowId, focused: true }
+      // 系统当前聚焦的窗口。`id` 是关键：pageIsActiveTab 要求
+      // "活动的 dsh 标签必须在**这个**窗口里"，只报 focused:true 是不够的。
+      return { id: fake.focusedWindowId, focused: fake.windowFocused }
     },
   },  /**
    * 注入页内点击用的假实现。真实调用是
@@ -867,6 +869,47 @@ describe('扩展：人就在网页前面时不该打扰（"有时候我在网页
     internals.origins.set(ORIGIN, { tabs: new Set([1]), visible: false, focused: false, lastSeen: Date.now() - 60000, since: Date.now() - 60000 })
     const decision = await internals.shouldShow({ ...idle('tokVisH'), origin: ORIGIN })
     assert.equal(decision.show, false, `报告过期但 dsh 就是活动标签，不该弹：${JSON.stringify(decision)}`)
+  })
+
+  it('兜底判据要求"活动的 dsh 标签就在聚焦窗口里"：标签在别的窗口 → 照常弹', async () => {
+    // 用户报的第二次："我在 dsh 网页里它还弹"。
+    // 这个用例盯住只查 tab.active 不够：浏览器在后台时它的活动标签照样 active=true，
+    // 必须再比一次"那个标签的窗口 == 系统聚焦窗口"。
+    freshStart({
+      tabs: [tab(1, `${ORIGIN}/#/`, { active: true, windowId: 1 })],
+      activeTabId: null,
+      focusedWindowId: 2, // 聚焦的是另一个窗口
+    })
+    internals.origins.set(ORIGIN, { tabs: new Set([1]), visible: false, focused: false, lastSeen: Date.now() - 60000, since: Date.now() - 60000 })
+    const decision = await internals.shouldShow({ ...idle('tokVisI'), origin: ORIGIN })
+    assert.equal(decision.show, true, `焦点不在 dsh 那个窗口，应当提醒：${JSON.stringify(decision)}`)
+  })
+
+  it('内容脚本的新鲜报告优先：报"可见+有焦点"就一定不弹（哪怕标签在别的窗口）', async () => {
+    // 心跳（content.js 每 20 秒）让这份自述一直新鲜，它就是最终结论 ——
+    // 这也是"人在 dsh 页面里还被弹通知"最常见的那条漏法：报告过期后
+    // 退回的兜底判据看不出"窗口有焦点但用户在别的应用里"。
+    freshStart({
+      tabs: [tab(1, `${ORIGIN}/#/`, { active: true, windowId: 1 })],
+      activeTabId: null,
+      focusedWindowId: 2,
+    })
+    internals.origins.set(ORIGIN, { tabs: new Set([1]), visible: true, focused: true, lastSeen: Date.now(), since: Date.now() })
+    const decision = await internals.shouldShow({ ...idle('tokVisJ'), origin: ORIGIN })
+    assert.equal(decision.show, false, `人在页面上，不该弹：${JSON.stringify(decision)}`)
+  })
+
+  it('人在别的应用里（窗口有焦点但 DOM 没焦点）→ 照常弹', async () => {
+    // document.hasFocus() === false 是唯一能分辨"窗口看起来有焦点、其实用户在别的应用里"
+    // 的信号，所以新鲜的 focused:false 必须压过"标签是活动标签"。
+    freshStart({
+      tabs: [tab(1, `${ORIGIN}/#/`, { active: true, windowId: 1 })],
+      activeTabId: null,
+      focusedWindowId: 1,
+    })
+    internals.origins.set(ORIGIN, { tabs: new Set([1]), visible: true, focused: false, lastSeen: Date.now(), since: Date.now() })
+    const decision = await internals.shouldShow({ ...idle('tokVisK'), origin: ORIGIN })
+    assert.equal(decision.show, true, `DOM 没焦点，应当提醒：${JSON.stringify(decision)}`)
   })
 })
 

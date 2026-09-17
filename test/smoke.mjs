@@ -826,6 +826,17 @@ describe('可发布性：版本 / 权限 / 打包清单', () => {
     assert.ok(existsSync(join(here, 'extension', manifest.background.service_worker)), 'service worker 文件不存在')
   })
 
+  it('内容脚本必须心跳（否则"人在页面上"的证据会过期，通知就会误弹）', () => {
+    // 后台用"报告新鲜度"决定内容脚本的自述还算不算数。没有心跳时，
+    // 用户一直盯着页面（visibilitychange / focus / blur 都不触发）会让报告变陈旧，
+    // 后台退回"活动标签"兜底判据 —— 而那一路看不出"窗口有焦点但用户在别的应用里"。
+    // 这条断言只是把"心跳不能删"钉住，具体行为由 test/extension.mjs 的判据用例覆盖。
+    const source = readFileSync(join(here, 'extension', 'content.js'), 'utf8')
+    assert.match(source, /setInterval\(/, 'content.js 里应当有周期性心跳（setInterval）')
+    assert.match(source, /visibilitychange/, 'content.js 应当监听 visibilitychange')
+    assert.match(source, /hasFocus\(\)/, 'content.js 应当用 document.hasFocus() 报焦点')
+  })
+
   it('扩展面板引用的图标都存在', () => {
     for (const [size, file] of Object.entries(manifest.icons ?? {})) {
       assert.ok(existsSync(join(here, 'extension', file)), `${size} 图标 ${file} 不存在`)

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "DSH 通知器",
   "short_name": "dsh-notifier",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "DeepSeek Harness 的一轮结束 / 审批提醒：弹出系统通知并显示 DSH 抛出的申请文字。审批通知带「回到对话 / 允许」，一轮结束带「回到对话 / 知道了」；要拒绝就点「回到对话」回网页里点。",
   "minimum_chrome_version": "116",
   "permissions": ["notifications", "storage", "tabs", "alarms", "scripting"],

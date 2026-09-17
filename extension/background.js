@@ -32,7 +32,7 @@ const NOTIFICATION_ID_PREFIX = 'dsh-notifier-'
  * 这一条就是用来一眼分辨的：/health 的 clientList 里会带上它，
  * 版本对不上就说明扩展没刷新。
  */
-const EXTENSION_BUILD = '5'
+const EXTENSION_BUILD = '6'
 
 /** origin -> { tabs:Set<number>, visible:boolean, focused:boolean } */
 const origins = new Map()
@@ -369,16 +369,16 @@ function reportIsFresh(state) {
 /**
  * dsh 页面是不是"当前活动窗口里的活动标签"。
  *
- * ⚠️ 这里**只查 dsh 标签，不过滤 `active` / `lastFocusedWindow`**，
- * 判据全部在下面用 JS 自己算。曾经的写法是
- * `chrome.tabs.query({ url: [origin + '/*'], active: true, lastFocusedWindow: true })`
- * 然后把"有没有结果"当成"用户正在看这个页面" —— 实测这个判据会**误判成在看**：
- * 只要浏览器里存在 dsh 标签就命中（用户报的症状："我明明选了在 dsh 页面时不通知，
- * 但它还是经常弹"）。`tabs.query` 的这两个过滤参数在真实 Chrome 里不可靠，
- * 而"有没有结果"这种写法一旦过滤失效就退化成"存在即在看"，正好把判决反过来。
+ * 这个判据必须**同时**满足两条，少一条都会误判成"人在看"（用户报的
+ * "我在 dsh 网页里它还弹"就是从这里漏出去的）：
  *
- * 所以改成：把 dsh 标签全查出来，**自己挑出当前活动的那个**，再问它的窗口有没有焦点。
- * 这样即使 url 之外的过滤参数被忽略，也不会把"后台窗口里挂着一个 dsh 标签"当成"在看"。
+ * 1. 某个 dsh 标签自己是 `active`（它在自己窗口里被选中）；
+ * 2. 那个标签所在的窗口 == **系统当前聚焦的窗口**（`windows.getLastFocused()`）。
+ *
+ * 只查 url、把"有结果"当"在看"是错的（老写法，过滤一旦失效就退化成"存在即在看"）；
+ * 只看 `tab.active` 也不够 —— 浏览器在后台时，它的活动标签依然 `active === true`。
+ *
+ * ⚠️ 这里**不**用 `tabs.query` 的 `active` / `lastFocusedWindow` 过滤参数，判据全部自己算。
  */
 async function pageIsActiveTab(origin) {
   if (!origin) return false
@@ -386,40 +386,41 @@ async function pageIsActiveTab(origin) {
     const tabs = await chrome.tabs.query({ url: [`${origin}/*`] })
     const active = tabs.filter((tab) => tab?.active === true)
     if (active.length === 0) return false
-    // 活动的那个标签在哪个窗口里，就问哪个窗口有没有焦点；
-    // 万一 API 没给 active（或没给 id），退回问"最后聚焦的窗口"。
-    const windowIds = [...new Set(active.map((tab) => tab.windowId).filter((id) => typeof id === 'number'))]
-    if (windowIds.length === 0) {
-      try {
-        const window = await chrome.windows.getLastFocused()
-        return Boolean(window) && window.focused !== false
-      } catch {
-        return false
-      }
-    }
+    let focusedWindow = null
     try {
-      const window = await chrome.windows.get(windowIds[0])
-      if (window && window.focused === false) return false
+      focusedWindow = await chrome.windows.getLastFocused()
     } catch {
-      /* 取不到窗口就不作为否决理由 */
+      /* 取不到就当"没有焦点窗口"，下面按否决处理 */
     }
-    return true
+    if (!focusedWindow) return false
+    // 窗口自己就报"没焦点"（用户在别的应用里）：直接否掉。
+    if (focusedWindow.focused === false) return false
+    const focusedId = focusedWindow.id
+    if (typeof focusedId !== 'number') return true
+    // 活动的 dsh 标签必须在**这个**聚焦窗口里；在别的窗口 = 那个窗口在后台。
+    return active.some((tab) => tab.windowId === focusedId)
   } catch (error) {
     log('查询活动标签失败', error)
     return false
   }
 }
 
+/**
+ * 人是不是正在看这个 dsh 页面。
+ *
+ * 两路证据，**内容脚本的新鲜自述优先**：
+ *
+ * - 内容脚本（`content.js`）每 20 秒心跳一次，报 `document.visibilityState` 和
+ *   `document.hasFocus()`。它新鲜时就是最终结论 —— 它是唯一能分辨
+ *   "窗口有焦点但用户在别的应用里"（`hasFocus()` 为 false）的信号。
+ * - 报告缺失或已过期（Service Worker 刚被回收、页面刚 reload）：退回
+ *   `pageIsActiveTab()` —— 现问现答，看 dsh 标签是不是"聚焦窗口里的活动标签"。
+ */
 async function pageIsWatching(origin) {
   const state = origins.get(origin)
-  // 内容脚本的报告只要还新鲜，就以它为准 —— 它用的是 document.hasFocus()，
-  // 是唯一能分辨"窗口有焦点但用户在别的应用里"的信号。
-  // （onDisconnect 不再把 focused 抹成 false，所以断开后这里读到的仍是"断开前"的
-  //   判断；它不新鲜之后才落到下面那个现问现答的判据。）
   if (reportIsFresh(state)) {
     return state.visible === true && state.focused === true
   }
-  // 报告缺失或已经不新鲜：问一次"这个页面是不是活动标签"。
   return await pageIsActiveTab(origin)
 }
 

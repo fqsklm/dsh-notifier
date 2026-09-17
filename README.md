@@ -12,7 +12,7 @@
 [![DSH](https://img.shields.io/badge/DSH-plugin-4d6bfe.svg)](https://www.npmjs.com/package/@deepseek-ai/dsh)
 [![Node](https://img.shields.io/badge/Node-%E2%89%A518-3c873a.svg)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-0-ff7a2a.svg)](#技术实现)
-[![Tests](https://img.shields.io/badge/checks-123%20passed-2ea44f.svg)](#测试)
+[![Tests](https://img.shields.io/badge/checks-127%20passed-2ea44f.svg)](#测试)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Chrome%20%2F%20Edge-lightgrey.svg)](#设计边界)
 
 [效果](#效果) · [快速开始](#快速开始) · [配置](#配置) · [为什么没有冷却](#为什么没有冷却) · [常见问题](#常见问题) · [协议](#协议想自己写客户端时看这里)
@@ -224,12 +224,17 @@ dsh-notifier/
   刷新扩展会清空 `storage.session`，所以启动时会把通知中心里还留着的
   `dsh-notifier-<token>` 重新认成"已弹过"；正在处理中的 token 还有一道同步闸门，
   快照和 pending 两帧交错时也只会弹一条。
-- **页面就在眼前时不打扰。** 判据是「dsh 页面可见 **且** 窗口有焦点」：内容脚本持续汇报
-  页面的可见性与焦点（用的是 `document.hasFocus()`）；这份报告超过 30 秒没更新（Service Worker
-  被回收、页面刚 reload）时，退回问一次"**dsh 标签是不是当前活动窗口里的活动标签**" ——
-  注意这一问只看标签自己的 `active` / `windowId` 字段，**不依赖 `tabs.query` 的过滤参数**
-  （那两个参数不可靠：过滤一旦失效，"浏览器里存在 dsh 标签"就会被当成"人在看"，
-  于是该弹的时候反而不弹）。想知道上一条为什么没弹，打开面板看「最近一条」那行。
+- **页面就在眼前时不打扰。** 两路证据，**内容脚本的新鲜自述优先**：
+  1. 内容脚本每 20 秒心跳一次，报 `document.visibilityState` 与 `document.hasFocus()`。
+     它新鲜时就是最终结论 —— `hasFocus()` 是**唯一**能分辨"窗口看起来有焦点、
+     其实用户在看别的应用"的信号；只有「可见 **且** 有焦点」才不打扰。
+  2. 报告缺失或已过期（Service Worker 刚被回收、页面刚 reload）：现问现答地问一次
+     "**聚焦窗口里的活动标签**是不是 dsh" —— 先 `windows.getLastFocused()` 拿到系统
+     聚焦的窗口，再要求有一个 dsh 标签 `active` 且 `windowId` 就是那个窗口。
+     两条都自己算，**不依赖 `tabs.query` 的 `active` / `lastFocusedWindow` 过滤参数**
+     （那两个参数不可靠：过滤一旦失效，"浏览器里存在 dsh 标签"就会被当成"人在看"；
+     反过来只看 `tab.active` 也不够 —— 浏览器在后台时它的活动标签照样是 `active`）。
+  想知道上一条为什么没弹，打开面板看「最近一条」那行。
 - **点「回到对话」会把那条通知撤下**，但审批本身仍然悬着：网页里的卡片还在，
   你回去看完可以接着拒绝。点「知道了」（一轮结束）则连待办一起收掉。
 - **划掉通知会告诉宿主。** 你把审批横幅划掉、或通知到点自动收掉时，扩展会发一条 `dismiss`
@@ -282,12 +287,12 @@ api-remotes 只在"收到客户端答复"时才向浏览器回 cancel 帧，
 
 ## 测试
 
-不需要任何测试框架，四套都是 `node` 直接跑的脚本，**当前 123 项全绿**：
+不需要任何测试框架，四套都是 `node` 直接跑的脚本，**当前 127 项全绿**：
 
 ```powershell
 npm test                        # 四套一起跑
-node test/smoke.mjs             # 宿主半边：真 HTTP + 真 WebSocket 端到端（55 项）
-node test/extension.mjs         # 扩展 Service Worker：假 chrome.* 跑真代码（32 项）
+node test/smoke.mjs             # 宿主半边：真 HTTP + 真 WebSocket 端到端（56 项）
+node test/extension.mjs         # 扩展 Service Worker：假 chrome.* 跑真代码（35 项）
 node test/page-approval.mjs     # "页内按一次允许"：假 DOM（23 项）
 node test/repro-allow-card.mjs  # 卡片回归：真实 cordis + 真实 api-remotes（13 项）
 npm run check                   # 九个文件逐个语法检查
@@ -333,7 +338,7 @@ node scripts/make-icons.mjs               # 重新生成扩展图标
 | 点了「允许」工具跑了，网页卡片却还停在「等待审批」 | 扩展没能去页内按按钮。看扩展日志里 `没能在网页里按下「允许」` 那行的 reason：`no-card` / `ambiguous` / `inject-failed`；同时确认扩展刷新过、`scripting` 权限已同意 |
 | 点了「允许」但工具没执行 | 先看 `/dsh-notifier/config` 的 `lastApproval.outcome`：是 `notified` 就是决定没送达宿主（扩展那一刻正在重连）。通知会**留着**让你再点一次 |
 | 连续几次审批只弹了一条 | 0.2.1 已修（冷却 + 审批互相作废都删掉了）。确认宿主**重启过**（宿主半边是 ESM，不重启跑的还是旧代码） |
-| 人就在 dsh 页面前，通知还是弹 | 0.2.2 已修（这个判据不再依赖 `tabs.query` 的 `active` / `lastFocusedWindow` 过滤参数）。确认扩展**刷新过**：面板里没有「最近一条」那行就是旧代码 |
+| 人就在 dsh 页面前，通知还是弹 | 0.2.3 已修（判据要求"活动的 dsh 标签就在**系统聚焦的那个窗口**里"，并给内容脚本加了 20 秒心跳，让"人在看"一直有新鲜证据）。确认扩展**刷新过**：面板里没有「最近一条」那行就是旧代码 |
 | 选了「永久」，横幅过一会儿自己没了 | 0.2.2 起「永久」会给通知打 `requireInteraction: true`，别再让它被系统按"通知显示时长"收走。还是不行就查 **系统 → 通知 → Google Chrome** 是否被静音 / 通知显示时长 / 勿扰 |
 | 自定义端口 | 面板里「手动连接」填 `http://127.0.0.1:<端口>`，会就地申请该来源权限 |
 | `git clone` 报 `schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS` | Windows 版 Git 的 schannel TLS 后端在这台机器上拿不到凭据。让它改用 OpenSSL 后端即可：`git -c http.sslBackend=openssl clone https://github.com/fqsklm/dsh-notifier.git`（想长期生效就 `git config --global http.sslBackend openssl`） |
@@ -366,10 +371,10 @@ node scripts/make-icons.mjs               # 重新生成扩展图标
 | `client/**`（浏览器半边） | 刷新 dsh 页面 | 同上 |
 | `cordis.patch.yml` 里的配置 | `patchReload: live` 会热加载 | 一般不需要重启 |
 
-> **0.2.2 同时改了宿主和扩展**：`extension/background.js` 是扩展侧的修复（抑制判据、
-> 永久横幅），`src/**` 是宿主侧的修复。所以升级到 0.2.2 要**两件都做**：
-> 在 `chrome://extensions` 里刷新扩展，并重启 `dsh web`。
-> 只做一半的症状是"两个毛病都还在"。
+> **0.2.3 只改了扩展**（抑制判据 + 内容脚本心跳）：在 `chrome://extensions` 里刷新扩展即可。
+> **0.2.2 两边都改了**（宿主那半边是审批相关的修复），那一版要顺手重启 `dsh web`。
+> 升级后想确认到底跑的是哪版：面板里的「最近一条」那行、以及宿主
+> `/dsh-notifier/health` 的 `clientList[].build`（扩展自报的构建代号）。
 
 ### 发布前检查清单
 
